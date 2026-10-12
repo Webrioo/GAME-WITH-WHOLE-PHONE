@@ -1,0 +1,6 @@
+{
+  "name": "Cosmic Surfer",
+  "description": "Endless 3D perspective space runner across the Moon, Mars, and Galaxy with cosmic obstacles and power-ups.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

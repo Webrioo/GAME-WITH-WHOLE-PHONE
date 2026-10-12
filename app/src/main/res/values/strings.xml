@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Cosmic Surfer</string>
+    <string name="play">Launch Run</string>
+    <string name="game_over">Mission Terminated</string>
+    <string name="score">Score</string>
+    <string name="high_score">Best Record</string>
+    <string name="stardust">Stardust Coins</string>
+    <string name="distance">Distance</string>
+    <string name="restart">Respawn</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume Mission</string>
+    <string name="shop">Hangar</string>
+    <string name="characters">Surfers</string>
+    <string name="upgrades">Tech Lab</string>
+</resources>
