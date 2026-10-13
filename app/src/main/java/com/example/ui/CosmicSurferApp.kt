@@ -57,6 +57,7 @@ fun CosmicSurferApp(
                 GameHud(
                     gameState = gameState,
                     onPauseClick = { viewModel.pauseGame() },
+                    onNitroClick = { viewModel.activateNitro() },
                     showOnScreenControls = showOnScreenControls,
                     onLeftClick = { viewModel.moveLeft() },
                     onRightClick = { viewModel.moveRight() },

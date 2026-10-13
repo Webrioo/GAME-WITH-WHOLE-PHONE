@@ -3,6 +3,8 @@ package com.example.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -28,12 +31,10 @@ import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.RocketLaunch
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +54,7 @@ import com.example.game.GameState
 fun GameHud(
     gameState: GameState,
     onPauseClick: () -> Unit,
+    onNitroClick: () -> Unit,
     showOnScreenControls: Boolean,
     onLeftClick: () -> Unit,
     onRightClick: () -> Unit,
@@ -76,7 +78,7 @@ fun GameHud(
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = Color(0xCC0F172A),
-                    modifier = Modifier.border(1.dp, gameState.currentBiome.railColor.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    modifier = Modifier.border(1.dp, gameState.currentBiome.railColor.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -102,7 +104,7 @@ fun GameHud(
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = Color(0xCC0F172A),
-                    modifier = Modifier.border(1.dp, Color(0xFFFFD700).copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    modifier = Modifier.border(1.dp, Color(0xFFFFD700).copy(alpha = 0.6f), RoundedCornerShape(20.dp))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -144,7 +146,7 @@ fun GameHud(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Score Banner
+            // Score Banner & Score Target
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -161,19 +163,38 @@ fun GameHud(
                     Text(
                         text = String.format("%,d", gameState.score),
                         color = Color.White,
-                        fontSize = 24.sp,
+                        fontSize = 26.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
 
-                // Biome Title
-                Text(
-                    text = gameState.currentBiome.title,
-                    color = gameState.currentBiome.gridColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
+                // Score Target Progress Widget
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "NEXT WARP: ${gameState.currentBiome.targetScore} PTS",
+                        color = gameState.currentBiome.gridColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "To ${gameState.currentBiome.nextBiomeName}",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val progressToWarp = (gameState.score.toFloat() / gameState.currentBiome.targetScore.toFloat()).coerceIn(0f, 1f)
+                    LinearProgressIndicator(
+                        progress = { progressToWarp },
+                        modifier = Modifier
+                            .width(130.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = gameState.currentBiome.gridColor,
+                        trackColor = Color(0x661E293B)
+                    )
+                }
             }
 
             // Power-up active timers
@@ -215,10 +236,74 @@ fun GameHud(
                         accentColor = Color(0xFFFF9800)
                     )
                 }
+                if (gameState.nitroBoostTime > 0f) {
+                    PowerupIndicator(
+                        icon = Icons.Default.Bolt,
+                        title = "NITRO",
+                        progress = gameState.nitroBoostTime / 4f,
+                        accentColor = Color(0xFF00F0FF)
+                    )
+                }
             }
         }
 
-        // OPTIONAL ON-SCREEN CONTROLS (for accessibility / tactile button lovers)
+        // WARP JUMP ANNOUNCEMENT BANNER
+        AnimatedVisibility(
+            visible = gameState.warpAnnouncement != null,
+            enter = slideInVertically() + fadeIn(),
+            exit = slideOutVertically() + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 20.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xEE0B132B),
+                modifier = Modifier
+                    .border(
+                        2.dp,
+                        Brush.horizontalGradient(listOf(Color(0xFF00F0FF), Color(0xFFEC4899), Color(0xFFFFD700))),
+                        RoundedCornerShape(18.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "★ HYPERSPACE JUMP ★",
+                        color = Color(0xFFFFD700),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = gameState.warpAnnouncement ?: "",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+
+        // NITRO BOOST ACTIVATOR BUTTON (Right edge)
+        val isNitroReady = gameState.nitroGauge >= 0.95f || gameState.nitroBoostTime > 0f
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 16.dp)
+        ) {
+            NitroDriveButton(
+                gauge = gameState.nitroGauge,
+                isActive = gameState.nitroBoostTime > 0f,
+                isReady = isNitroReady,
+                onClick = onNitroClick
+            )
+        }
+
+        // OPTIONAL ON-SCREEN CONTROLS
         AnimatedVisibility(
             visible = showOnScreenControls,
             enter = fadeIn(),
@@ -271,6 +356,47 @@ fun GameHud(
 }
 
 @Composable
+private fun NitroDriveButton(
+    gauge: Float,
+    isActive: Boolean,
+    isReady: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = if (isActive) Color(0xFF00F0FF) else if (isReady) Color(0xEE0F172A) else Color(0xAA0F172A),
+        modifier = Modifier
+            .size(54.dp)
+            .border(
+                width = if (isReady) 2.5.dp else 1.5.dp,
+                color = if (isReady) Color(0xFF00F0FF) else Color(0xFF475569),
+                shape = CircleShape
+            )
+            .clickable(enabled = isReady, onClick = onClick)
+            .testTag("nitro_button")
+    ) {
+        Column(
+            modifier = Modifier.padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Bolt,
+                contentDescription = "Nitro Boost",
+                tint = if (isActive) Color(0xFF0F172A) else if (isReady) Color(0xFF00F0FF) else Color(0xFF64748B),
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = if (isActive) "WARP" else "${(gauge * 100).toInt()}%",
+                color = if (isActive) Color(0xFF0F172A) else if (isReady) Color(0xFF00F0FF) else Color(0xFF94A3B8),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
+
+@Composable
 private fun PowerupIndicator(
     icon: ImageVector,
     title: String,
@@ -282,7 +408,7 @@ private fun PowerupIndicator(
         color = Color(0xD90F172A),
         modifier = Modifier
             .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-            .width(82.dp)
+            .width(76.dp)
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),

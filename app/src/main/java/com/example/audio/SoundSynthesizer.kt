@@ -125,6 +125,43 @@ class SoundSynthesizer {
         }
     }
 
+    fun playWarpSound() {
+        if (!isSfxEnabled) return
+        audioScope.launch {
+            val durationMs = 380
+            val numSamples = (sampleRate * durationMs / 1000)
+            val buffer = ShortArray(numSamples)
+            for (i in 0 until numSamples) {
+                val progress = i.toDouble() / numSamples
+                val currentFreq = 220.0 + (progress * progress) * 1100.0 // accelerating cosmic warp sweep
+                val wave = sin(2.0 * PI * currentFreq * (i.toDouble() / sampleRate)) +
+                        0.3 * sin(2.0 * PI * (currentFreq * 1.5) * (i.toDouble() / sampleRate))
+                val env = sin(progress * PI)
+                buffer[i] = (wave * env * Short.MAX_VALUE * 0.55).toInt().toShort()
+            }
+            playShortBuffer(buffer)
+        }
+    }
+
+    fun playHyperRingSound() {
+        if (!isSfxEnabled) return
+        audioScope.launch {
+            val freqs = doubleArrayOf(587.33, 880.0, 1174.66) // D major octave ascension
+            for (freq in freqs) {
+                val durationMs = 50
+                val numSamples = (sampleRate * durationMs / 1000)
+                val buffer = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    val wave = sin(2.0 * PI * freq * t)
+                    val env = 1.0 - (i.toDouble() / numSamples)
+                    buffer[i] = (wave * env * Short.MAX_VALUE * 0.5).toInt().toShort()
+                }
+                playShortBuffer(buffer)
+            }
+        }
+    }
+
     fun playCrashSound() {
         if (!isSfxEnabled) return
         audioScope.launch {

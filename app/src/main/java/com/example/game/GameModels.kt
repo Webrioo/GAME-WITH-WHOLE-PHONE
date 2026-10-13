@@ -7,7 +7,8 @@ enum class ObstacleType {
     LOW_ROCK,        // Jump over
     HIGH_LASER,      // Slide under
     TALL_CONTAINER,  // Change lane
-    HOVER_DRONE      // Tall/flying robot, change lane
+    HOVER_DRONE,     // Flying robot, change lane
+    WARP_GATE        // Hyperspace Stargate to travel to next planet!
 }
 
 data class Obstacle(
@@ -22,7 +23,9 @@ enum class CollectibleType {
     JETPACK,
     MAGNET,
     SHIELD,
-    MULTIPLIER_2X
+    MULTIPLIER_2X,
+    HYPER_RING,    // Launch into super-jump orbit!
+    NITRO_CELL     // Collect to charge hyperdrive dash
 }
 
 data class Collectible(
@@ -39,32 +42,45 @@ enum class Biome(
     val bgDrawableRes: Int,
     val gridColor: Color,
     val railColor: Color,
-    val fogColor: Color,
-    val description: String
+    val glowColor: Color,
+    val targetScore: Int,
+    val nextBiomeName: String
 ) {
     MOON_BASE(
         title = "Moon Base Alpha",
         bgDrawableRes = R.drawable.bg_moon,
         gridColor = Color(0xFF00E5FF),
         railColor = Color(0xFF38BDF8),
-        fogColor = Color(0xFF0F172A),
-        description = "Low gravity lunar orbit facility"
+        glowColor = Color(0x3300E5FF),
+        targetScore = 1000,
+        nextBiomeName = "Mars Olympus Rift"
     ),
     MARS_CANYONS(
         title = "Mars Olympus Rift",
         bgDrawableRes = R.drawable.bg_mars,
         gridColor = Color(0xFFFF6D00),
         railColor = Color(0xFFFB923C),
-        fogColor = Color(0xFF2B0E07),
-        description = "Fiery red Martian ravines and craters"
+        glowColor = Color(0x33FF6D00),
+        targetScore = 2500,
+        nextBiomeName = "Cosmic Nebula"
     ),
     DEEP_GALAXY(
         title = "Cosmic Nebula",
         bgDrawableRes = R.drawable.bg_galaxy,
         gridColor = Color(0xFFD946EF),
         railColor = Color(0xFFA855F7),
-        fogColor = Color(0xFF130924),
-        description = "Luminous stardust realm across deep space"
+        glowColor = Color(0x33D946EF),
+        targetScore = 5000,
+        nextBiomeName = "Saturn Rings Station"
+    ),
+    SATURN_RINGS(
+        title = "Saturn Rings Station",
+        bgDrawableRes = R.drawable.bg_saturn,
+        gridColor = Color(0xFFFFD700),
+        railColor = Color(0xFFFBBF24),
+        glowColor = Color(0x33FFD700),
+        targetScore = 10000,
+        nextBiomeName = "Moon Base Alpha"
     )
 }
 

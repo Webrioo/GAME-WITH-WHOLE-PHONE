@@ -144,6 +144,7 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     fun moveRight() = gameEngine.moveRight()
     fun jump() = gameEngine.jump()
     fun slide() = gameEngine.slide()
+    fun activateNitro() = gameEngine.activateNitro()
 
     private fun startGameLoop() {
         gameLoopJob?.cancel()

@@ -7,7 +7,6 @@ import com.example.data.UserStatsEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlin.math.sin
 import kotlin.random.Random
 
 class GameEngine(
@@ -18,14 +17,15 @@ class GameEngine(
         const val LANE_LEFT = -1
         const val LANE_CENTER = 0
         const val LANE_RIGHT = 1
-        const val Z_MAX = 1200f
+        const val Z_MAX = 1400f
         const val Z_PLAYER = 60f
-        const val BASE_SPEED = 240f // units per second
-        const val MAX_SPEED = 560f
-        const val GRAVITY = 1100f
-        const val JUMP_FORCE = 520f
-        const val SLIDE_TIME = 0.85f // seconds
-        const val JETPACK_ALTITUDE = 160f
+        const val BASE_SPEED = 280f
+        const val MAX_SPEED = 640f
+        const val GRAVITY = 1150f
+        const val JUMP_FORCE = 540f
+        const val SUPER_JUMP_FORCE = 740f
+        const val SLIDE_TIME = 0.85f
+        const val JETPACK_ALTITUDE = 180f
     }
 
     private val _gameState = MutableStateFlow(GameState())
@@ -33,14 +33,13 @@ class GameEngine(
 
     private var nextObjectId = 1L
     private var spawnTimer = 0f
-    private var powerupTimer = 0f
     private var coinStreak = 0
     private var coinStreakResetTimer = 0f
+    private var warpGateSpawnedForScore = 0
 
     fun startNewGame(userStats: UserStatsEntity) {
         val selectedChar = ALL_CHARACTERS.find { it.id == userStats.selectedCharacterId } ?: ALL_CHARACTERS.first()
 
-        // Calculate power-up durations based on tech upgrades
         val magnetDuration = 10f + (userStats.magnetLevel - 1) * 2.5f
         val jetpackDuration = 8f + (userStats.jetpackLevel - 1) * 2.0f
         val shieldDuration = 15f + (userStats.shieldLevel - 1) * 3.0f
@@ -51,6 +50,7 @@ class GameEngine(
             isGameOver = false,
             isPaused = false,
             character = selectedChar,
+            currentBiome = Biome.MOON_BASE,
             magnetMaxDuration = magnetDuration,
             jetpackMaxDuration = jetpackDuration,
             shieldMaxDuration = shieldDuration,
@@ -58,8 +58,8 @@ class GameEngine(
         )
 
         spawnTimer = 0f
-        powerupTimer = 0f
         coinStreak = 0
+        warpGateSpawnedForScore = 0
         soundSynthesizer.startMusic()
     }
 
@@ -98,7 +98,7 @@ class GameEngine(
     fun jump() {
         val state = _gameState.value
         if (!state.isPlaying || state.isGameOver || state.isPaused) return
-        if (state.jetpackActiveTime > 0f) return // Already in sky
+        if (state.jetpackActiveTime > 0f) return
 
         if (state.playerJumpY <= 1f) {
             _gameState.value = state.copy(
@@ -117,9 +117,8 @@ class GameEngine(
         if (!state.isPlaying || state.isGameOver || state.isPaused) return
         if (state.jetpackActiveTime > 0f) return
 
-        // Fast fall if currently in the air
         val newJumpY = if (state.playerJumpY > 0f) 0f else state.playerJumpY
-        val newVel = if (state.playerJumpY > 0f) -400f else 0f
+        val newVel = if (state.playerJumpY > 0f) -500f else 0f
 
         _gameState.value = state.copy(
             isSliding = true,
@@ -132,51 +131,82 @@ class GameEngine(
         hapticsManager.vibrateSlide()
     }
 
+    fun activateNitro() {
+        val state = _gameState.value
+        if (!state.isPlaying || state.isGameOver || state.isPaused) return
+        if (state.nitroGauge >= 0.95f && state.nitroBoostTime <= 0f) {
+            _gameState.value = state.copy(
+                nitroBoostTime = 4.0f,
+                nitroGauge = 0f
+            )
+            soundSynthesizer.playHyperRingSound()
+            hapticsManager.vibrateWarp()
+        }
+    }
+
     fun update(deltaSeconds: Float) {
         val state = _gameState.value
         if (!state.isPlaying || state.isGameOver || state.isPaused) return
 
         val dt = deltaSeconds.coerceIn(0f, 0.05f)
 
-        // Calculate current forward speed
-        val currentSpeed = (BASE_SPEED + (state.distanceRunMeters * 0.16f)).coerceAtMost(MAX_SPEED)
-        val distanceDelta = (currentSpeed * dt) / 10f // meters
+        // Speed calculation (boosted during Nitro)
+        val isNitro = state.nitroBoostTime > 0f
+        val nitroSpeedBoost = if (isNitro) 1.55f else 1.0f
+        val baseSpeed = (BASE_SPEED + (state.distanceRunMeters * 0.18f)).coerceAtMost(MAX_SPEED)
+        val currentSpeed = baseSpeed * nitroSpeedBoost
+
+        val distanceDelta = (currentSpeed * dt) / 10f
         val newDistance = state.distanceRunMeters + distanceDelta
 
-        // Dynamic Biome based on distance
-        val currentBiome = when {
-            newDistance % 2400f < 800f -> Biome.MOON_BASE
-            newDistance % 2400f < 1600f -> Biome.MARS_CANYONS
-            else -> Biome.DEEP_GALAXY
-        }
-
-        // Active power-up timers
+        // Active timers
         val newMagnetTime = (state.magnetActiveTime - dt).coerceAtLeast(0f)
         val newJetpackTime = (state.jetpackActiveTime - dt).coerceAtLeast(0f)
         val newShieldTime = (state.shieldActiveTime - dt).coerceAtLeast(0f)
         val newMultiplierTime = (state.multiplierActiveTime - dt).coerceAtLeast(0f)
+        val newNitroTime = (state.nitroBoostTime - dt).coerceAtLeast(0f)
+        val newWarpTimer = (state.warpEffectTimer - dt).coerceAtLeast(0f)
 
-        // Score Multiplier
         val activeMultiplier = (if (newMultiplierTime > 0f) 2f else 1f) * state.baseMultiplierBonus
-        val scoreGain = (distanceDelta * 2.2f * activeMultiplier).toInt()
+        val scoreGain = (distanceDelta * 2.4f * activeMultiplier).toInt()
         val newScore = state.score + scoreGain
 
-        // Smooth horizontal lane transition
-        val currentLaneX = state.playerLaneX + (state.targetLane - state.playerLaneX) * (14f * dt).coerceAtMost(1f)
+        // Score Target Biome Progression
+        var currentBiome = state.currentBiome
+        var warpAnnouncement = if (newWarpTimer > 0f) state.warpAnnouncement else null
+        var triggeredWarpEffect = false
 
-        // Jump & Gravity physics
+        // Check if player reached the score milestone for next biome
+        val targetScore = currentBiome.targetScore
+        if (newScore >= targetScore && warpGateSpawnedForScore < targetScore) {
+            warpGateSpawnedForScore = targetScore
+            // Switch to next biome!
+            currentBiome = when (currentBiome) {
+                Biome.MOON_BASE -> Biome.MARS_CANYONS
+                Biome.MARS_CANYONS -> Biome.DEEP_GALAXY
+                Biome.DEEP_GALAXY -> Biome.SATURN_RINGS
+                Biome.SATURN_RINGS -> Biome.MOON_BASE
+            }
+            triggeredWarpEffect = true
+            warpAnnouncement = "WARP JUMP! ENTERING ${currentBiome.title.uppercase()}"
+            soundSynthesizer.playWarpSound()
+            hapticsManager.vibrateWarp()
+        }
+
+        // Horizontal lane transition
+        val currentLaneX = state.playerLaneX + (state.targetLane - state.playerLaneX) * (15f * dt).coerceAtMost(1f)
+
+        // Jump / Jetpack / Gravity
         var playerY = state.playerJumpY
         var jumpVel = state.jumpVelocity
         var isJumping = state.isJumping
 
         if (newJetpackTime > 0f) {
-            // Jetpack smoothly hovers in the stratosphere
             playerY += (JETPACK_ALTITUDE - playerY) * (8f * dt)
             jumpVel = 0f
             isJumping = false
         } else {
-            // Normal gravity
-            if (playerY > 0f || jumpVel > 0f) {
+            if (playerY > 0f || jumpVel != 0f) {
                 playerY += jumpVel * dt
                 jumpVel -= GRAVITY * dt
                 if (playerY <= 0f) {
@@ -187,7 +217,7 @@ class GameEngine(
             }
         }
 
-        // Slide / Crouch timer
+        // Slide timer
         var slideTime = state.slideTimeRemaining
         var isSliding = state.isSliding
         if (slideTime > 0f) {
@@ -198,7 +228,6 @@ class GameEngine(
             }
         }
 
-        // Update coin streak combo timer
         if (coinStreakResetTimer > 0f) {
             coinStreakResetTimer -= dt
             if (coinStreakResetTimer <= 0f) {
@@ -206,36 +235,47 @@ class GameEngine(
             }
         }
 
-        // Advance obstacles
+        // Obstacles collision & progress
         val updatedObstacles = mutableListOf<Obstacle>()
         var hitObstacle = false
         var hitObstacleType: ObstacleType? = null
-
-        val isJetpackFlying = newJetpackTime > 0f
+        val isInvincible = state.isInvulnerable || isNitro
 
         for (obs in state.obstacles) {
-            val prevZ = obs.z
-            val newZ = prevZ - (currentSpeed * dt)
+            val newZ = obs.z - (currentSpeed * dt)
 
-            // Collision check: player is around Z_PLAYER (depth buffer ~ 40f to 80f)
+            // Warp gate trigger
+            if (obs.type == ObstacleType.WARP_GATE && newZ in (Z_PLAYER - 30f)..(Z_PLAYER + 30f)) {
+                // Surfed through Stargate!
+                triggeredWarpEffect = true
+                currentBiome = when (currentBiome) {
+                    Biome.MOON_BASE -> Biome.MARS_CANYONS
+                    Biome.MARS_CANYONS -> Biome.DEEP_GALAXY
+                    Biome.DEEP_GALAXY -> Biome.SATURN_RINGS
+                    Biome.SATURN_RINGS -> Biome.MOON_BASE
+                }
+                warpAnnouncement = "WARP JUMP! ENTERING ${currentBiome.title.uppercase()}"
+                soundSynthesizer.playWarpSound()
+                hapticsManager.vibrateWarp()
+            }
+
+            // Normal obstacle collision
             val inCollisionZ = newZ in (Z_PLAYER - 25f)..(Z_PLAYER + 25f)
-            val inPlayerLane = kotlin.math.abs(obs.lane - currentLaneX) < 0.55f
+            val inPlayerLane = kotlin.math.abs(obs.lane - currentLaneX) < 0.65f
 
-            if (!isJetpackFlying && inCollisionZ && inPlayerLane && !state.isInvulnerable) {
+            if (newJetpackTime <= 0f && inCollisionZ && inPlayerLane && !isInvincible && obs.type != ObstacleType.WARP_GATE) {
                 var collisionAvoided = false
                 when (obs.type) {
                     ObstacleType.LOW_ROCK -> {
-                        // Avoided if jumping high enough
-                        if (playerY > 38f) collisionAvoided = true
+                        if (playerY > 35f) collisionAvoided = true
                     }
                     ObstacleType.HIGH_LASER -> {
-                        // Avoided if sliding/crouching
-                        if (isSliding && playerY < 15f) collisionAvoided = true
+                        if (isSliding && playerY < 18f) collisionAvoided = true
                     }
                     ObstacleType.TALL_CONTAINER, ObstacleType.HOVER_DRONE -> {
-                        // Must be in different lane!
                         collisionAvoided = false
                     }
+                    ObstacleType.WARP_GATE -> collisionAvoided = true
                 }
 
                 if (!collisionAvoided) {
@@ -249,22 +289,19 @@ class GameEngine(
             }
         }
 
-        // Handle collision with obstacle
+        // Handle collision damage
         var finalShieldTime = newShieldTime
         var isGameOver = false
         var invulnerableTimer = (state.invulnerableTimer - dt).coerceAtLeast(0f)
 
         if (hitObstacle) {
             if (finalShieldTime > 0f) {
-                // Shield absorbs blow!
                 finalShieldTime = 0f
-                invulnerableTimer = 1.8f
+                invulnerableTimer = 2.0f
                 soundSynthesizer.playShieldDeflectSound()
                 hapticsManager.vibrateCrash()
-                // Clear immediate obstacles in front
-                updatedObstacles.removeAll { it.z < 250f }
+                updatedObstacles.removeAll { it.z < 260f }
             } else {
-                // Game Over!
                 isGameOver = true
                 soundSynthesizer.playCrashSound()
                 soundSynthesizer.stopMusic()
@@ -272,35 +309,34 @@ class GameEngine(
             }
         }
 
-        // Advance collectibles & handle pickups
+        // Collectibles & Pickups
         val updatedCollectibles = mutableListOf<Collectible>()
         var coinsGathered = 0
         var activatedJetpack = false
         var activatedMagnet = false
         var activatedShield = false
         var activatedMultiplier = false
+        var nitroGain = 0f
 
-        val magnetActive = newMagnetTime > 0f
+        val magnetActive = newMagnetTime > 0f || isNitro
 
         for (col in state.collectibles) {
             var colLane = col.lane
             var colZ = col.z - (currentSpeed * dt)
             var colY = col.yOffset
 
-            // Magnet attraction
-            if (magnetActive && col.type == CollectibleType.COIN && colZ in 0f..500f) {
-                // Pull towards current player lane and Y
+            // Magnet pull across lanes
+            if (magnetActive && col.type == CollectibleType.COIN && colZ in 0f..550f) {
                 val targetLaneVal = currentLaneX.toInt()
                 if (colLane < targetLaneVal) colLane += 1
                 if (colLane > targetLaneVal) colLane -= 1
-                colY += (playerY - colY) * (10f * dt)
-                colZ -= (currentSpeed * 0.4f * dt) // pull forward
+                colY += (playerY - colY) * (12f * dt)
+                colZ -= (currentSpeed * 0.45f * dt)
             }
 
-            // Pickup check
-            val inPickupZ = colZ in (Z_PLAYER - 30f)..(Z_PLAYER + 30f)
-            val inPickupLane = kotlin.math.abs(colLane - currentLaneX) < 0.65f
-            val inPickupY = kotlin.math.abs(colY - playerY) < 55f
+            val inPickupZ = colZ in (Z_PLAYER - 35f)..(Z_PLAYER + 35f)
+            val inPickupLane = kotlin.math.abs(colLane - currentLaneX) < 0.72f
+            val inPickupY = kotlin.math.abs(colY - playerY) < 65f
 
             if (inPickupZ && inPickupLane && inPickupY && !col.isCollected) {
                 col.isCollected = true
@@ -308,7 +344,8 @@ class GameEngine(
                     CollectibleType.COIN -> {
                         coinsGathered += 1
                         coinStreak++
-                        coinStreakResetTimer = 2.0f
+                        coinStreakResetTimer = 2.2f
+                        nitroGain += 0.08f
                         soundSynthesizer.playCoinSound(coinStreak)
                         hapticsManager.vibrateCoin()
                     }
@@ -328,23 +365,45 @@ class GameEngine(
                         activatedMultiplier = true
                         soundSynthesizer.playPowerupSound()
                     }
+                    CollectibleType.HYPER_RING -> {
+                        // Launch super jump!
+                        playerY = 10f
+                        jumpVel = SUPER_JUMP_FORCE
+                        isJumping = true
+                        soundSynthesizer.playHyperRingSound()
+                        hapticsManager.vibrateWarp()
+                    }
+                    CollectibleType.NITRO_CELL -> {
+                        nitroGain += 0.5f
+                        soundSynthesizer.playPowerupSound()
+                    }
                 }
             } else if (colZ > -30f && !col.isCollected) {
                 updatedCollectibles.add(col.copy(lane = colLane, z = colZ, yOffset = colY))
             }
         }
 
-        // Spawning new items
-        spawnTimer += dt
-        powerupTimer += dt
+        // Update nitro gauge
+        val updatedNitroGauge = (state.nitroGauge + nitroGain).coerceIn(0f, 1f)
 
-        if (spawnTimer >= (1.1f - (currentSpeed / MAX_SPEED) * 0.45f).coerceAtLeast(0.48f)) {
+        // Spawning patterns
+        spawnTimer += dt
+        val spawnInterval = (1.15f - (currentSpeed / MAX_SPEED) * 0.45f).coerceAtLeast(0.45f)
+        if (spawnTimer >= spawnInterval) {
             spawnTimer = 0f
-            spawnPattern(updatedObstacles, updatedCollectibles, isJetpackFlying)
+            spawnPattern(updatedObstacles, updatedCollectibles, newJetpackTime > 0f)
         }
 
         // Particle updates
-        val particles = updateParticles(state.particles, dt, currentLaneX, playerY, state.character.jetFlameColor)
+        val particles = updateParticles(
+            state.particles,
+            dt,
+            currentLaneX,
+            playerY,
+            state.character.jetFlameColor,
+            isNitro,
+            newWarpTimer > 0f
+        )
 
         _gameState.value = state.copy(
             score = newScore,
@@ -364,6 +423,10 @@ class GameEngine(
             jetpackActiveTime = if (activatedJetpack) state.jetpackMaxDuration else newJetpackTime,
             shieldActiveTime = if (activatedShield) state.shieldMaxDuration else finalShieldTime,
             multiplierActiveTime = if (activatedMultiplier) 12f else newMultiplierTime,
+            nitroBoostTime = newNitroTime,
+            nitroGauge = updatedNitroGauge,
+            warpEffectTimer = if (triggeredWarpEffect) 1.5f else newWarpTimer,
+            warpAnnouncement = warpAnnouncement,
             invulnerableTimer = invulnerableTimer,
             isGameOver = isGameOver
         )
@@ -376,14 +439,13 @@ class GameEngine(
     ) {
         val spawnZ = Z_MAX
         if (isJetpackMode) {
-            // In jetpack mode, spawn rich golden coin clusters in the sky!
             val lane = Random.nextInt(3) - 1
             for (i in 0..4) {
                 collectibles.add(
                     Collectible(
                         id = nextObjectId++,
                         lane = lane,
-                        z = spawnZ + (i * 50f),
+                        z = spawnZ + (i * 55f),
                         yOffset = JETPACK_ALTITUDE,
                         type = CollectibleType.COIN
                     )
@@ -392,60 +454,44 @@ class GameEngine(
             return
         }
 
-        // Decide pattern type:
-        // 1. Single obstacle + coins on other lanes
-        // 2. Jump obstacle with coin arc above it
-        // 3. High laser barrier with coins on ground to slide through
-        // 4. Double obstacle (leaving 1 escape lane)
-        // 5. Power-up spawn
-        val patternType = Random.nextInt(6)
+        // Pattern selection:
+        // 0: Low rock with jump coin arc
+        // 1: High laser with ground coins to slide under
+        // 2: Tall container in one lane, hyper jump ring in open lane
+        // 3: Double obstacles with open escape lane
+        // 4: Hyper jump ring launching over two obstacles with coin arc
+        // 5: Power-up or nitro cell
+        val pattern = Random.nextInt(7)
 
-        when (patternType) {
+        when (pattern) {
             0 -> {
-                // Jumpable rock with coin arc
                 val lane = Random.nextInt(3) - 1
                 obstacles.add(
                     Obstacle(id = nextObjectId++, lane = lane, z = spawnZ, type = ObstacleType.LOW_ROCK)
                 )
-                // Coin arc above
+                // Coin arc
                 for (step in -1..1) {
                     collectibles.add(
                         Collectible(
                             id = nextObjectId++,
                             lane = lane,
-                            z = spawnZ + (step * 45f),
-                            yOffset = 50f + (if (step == 0) 25f else 0f),
+                            z = spawnZ + (step * 50f),
+                            yOffset = 60f + (if (step == 0) 30f else 0f),
                             type = CollectibleType.COIN
                         )
                     )
                 }
             }
             1 -> {
-                // Slideable high laser barrier
                 val lane = Random.nextInt(3) - 1
                 obstacles.add(
                     Obstacle(id = nextObjectId++, lane = lane, z = spawnZ, type = ObstacleType.HIGH_LASER)
                 )
-                // Coins under it to encourage sliding!
-                collectibles.add(
-                    Collectible(id = nextObjectId++, lane = lane, z = spawnZ, yOffset = 0f, type = CollectibleType.COIN)
-                )
-            }
-            2 -> {
-                // Tall obstacle in one lane, coin line in adjacent lane
-                val blockedLane = Random.nextInt(3) - 1
-                val type = if (Random.nextBoolean()) ObstacleType.TALL_CONTAINER else ObstacleType.HOVER_DRONE
-                obstacles.add(
-                    Obstacle(id = nextObjectId++, lane = blockedLane, z = spawnZ, type = type)
-                )
-
-                // Place coins in a clear lane
-                val coinLane = if (blockedLane == 0) 1 else 0
                 for (i in 0..2) {
                     collectibles.add(
                         Collectible(
                             id = nextObjectId++,
-                            lane = coinLane,
+                            lane = lane,
                             z = spawnZ + (i * 45f),
                             yOffset = 0f,
                             type = CollectibleType.COIN
@@ -453,40 +499,92 @@ class GameEngine(
                     )
                 }
             }
+            2 -> {
+                val blockedLane = Random.nextInt(3) - 1
+                obstacles.add(
+                    Obstacle(id = nextObjectId++, lane = blockedLane, z = spawnZ, type = ObstacleType.TALL_CONTAINER)
+                )
+                val openLane = if (blockedLane == 0) 1 else 0
+                // Spawn a Hyper Jump Ring in open lane!
+                collectibles.add(
+                    Collectible(
+                        id = nextObjectId++,
+                        lane = openLane,
+                        z = spawnZ,
+                        yOffset = 15f,
+                        type = CollectibleType.HYPER_RING
+                    )
+                )
+            }
             3 -> {
-                // Double obstacles (1 escape lane!)
+                // Double obstacles (1 escape lane)
                 val openLane = Random.nextInt(3) - 1
                 for (lane in -1..1) {
                     if (lane != openLane) {
-                        val obsType = if (Random.nextBoolean()) ObstacleType.TALL_CONTAINER else ObstacleType.LOW_ROCK
+                        val type = if (Random.nextBoolean()) ObstacleType.TALL_CONTAINER else ObstacleType.LOW_ROCK
                         obstacles.add(
-                            Obstacle(id = nextObjectId++, lane = lane, z = spawnZ, type = obsType)
+                            Obstacle(id = nextObjectId++, lane = lane, z = spawnZ, type = type)
                         )
                     }
                 }
-                // Place rewarding coins in open lane
-                collectibles.add(
-                    Collectible(id = nextObjectId++, lane = openLane, z = spawnZ, yOffset = 0f, type = CollectibleType.COIN)
-                )
-            }
-            4 -> {
-                // Coin trail across lane
-                val lane = Random.nextInt(3) - 1
-                for (i in 0..4) {
+                for (i in 0..2) {
                     collectibles.add(
                         Collectible(
                             id = nextObjectId++,
-                            lane = lane,
-                            z = spawnZ + (i * 40f),
+                            lane = openLane,
+                            z = spawnZ + (i * 45f),
                             yOffset = 0f,
                             type = CollectibleType.COIN
                         )
                     )
                 }
             }
+            4 -> {
+                // Hyper Ring in middle launching over rocks with high coins
+                collectibles.add(
+                    Collectible(
+                        id = nextObjectId++,
+                        lane = 0,
+                        z = spawnZ,
+                        yOffset = 15f,
+                        type = CollectibleType.HYPER_RING
+                    )
+                )
+                obstacles.add(
+                    Obstacle(id = nextObjectId++, lane = 0, z = spawnZ + 120f, type = ObstacleType.LOW_ROCK)
+                )
+                for (i in 1..4) {
+                    collectibles.add(
+                        Collectible(
+                            id = nextObjectId++,
+                            lane = 0,
+                            z = spawnZ + (i * 60f),
+                            yOffset = 120f,
+                            type = CollectibleType.COIN
+                        )
+                    )
+                }
+            }
             5 -> {
-                // Power-up chance
-                val powerupLane = Random.nextInt(3) - 1
+                // Flying drone obstacle
+                val lane = Random.nextInt(3) - 1
+                obstacles.add(
+                    Obstacle(id = nextObjectId++, lane = lane, z = spawnZ, type = ObstacleType.HOVER_DRONE)
+                )
+                val altLane = if (lane == 0) -1 else 0
+                collectibles.add(
+                    Collectible(
+                        id = nextObjectId++,
+                        lane = altLane,
+                        z = spawnZ,
+                        yOffset = 0f,
+                        type = CollectibleType.NITRO_CELL
+                    )
+                )
+            }
+            else -> {
+                // Power-up
+                val lane = Random.nextInt(3) - 1
                 val pType = when (Random.nextInt(4)) {
                     0 -> CollectibleType.JETPACK
                     1 -> CollectibleType.MAGNET
@@ -496,9 +594,9 @@ class GameEngine(
                 collectibles.add(
                     Collectible(
                         id = nextObjectId++,
-                        lane = powerupLane,
+                        lane = lane,
                         z = spawnZ,
-                        yOffset = 15f,
+                        yOffset = 20f,
                         type = pType
                     )
                 )
@@ -511,11 +609,12 @@ class GameEngine(
         dt: Float,
         playerLaneX: Float,
         playerY: Float,
-        flameColor: Color
+        flameColor: Color,
+        isNitro: Boolean,
+        isWarp: Boolean
     ): List<Particle> {
         val list = mutableListOf<Particle>()
 
-        // Update existing
         for (p in existing) {
             p.life -= dt
             if (p.life > 0f) {
@@ -526,22 +625,21 @@ class GameEngine(
             }
         }
 
-        // Spawn hoverboard thruster exhaust flame particles
-        if (list.size < 40) {
-            val spreadX = (Random.nextFloat() - 0.5f) * 12f
-            val speedY = 50f + Random.nextFloat() * 80f
-            val particleColor = if (Random.nextBoolean()) flameColor else Color(0xFFFFD600)
+        // Hoverboard flame exhaust particles
+        val maxParticles = if (isWarp || isNitro) 80 else 40
+        if (list.size < maxParticles) {
+            val color = if (isNitro) Color(0xFF00F0FF) else if (Random.nextBoolean()) flameColor else Color(0xFFFFD600)
             list.add(
                 Particle(
-                    x = playerLaneX * 80f + spreadX,
-                    y = playerY - 5f,
-                    vx = (Random.nextFloat() - 0.5f) * 30f,
-                    vy = -speedY,
-                    color = particleColor,
-                    alpha = 0.9f,
-                    life = 0.35f,
-                    maxLife = 0.35f,
-                    size = 5f + Random.nextFloat() * 6f
+                    x = playerLaneX * 120f + (Random.nextFloat() - 0.5f) * 20f,
+                    y = playerY - 8f,
+                    vx = (Random.nextFloat() - 0.5f) * 50f,
+                    vy = -(80f + Random.nextFloat() * 100f),
+                    color = color,
+                    alpha = 0.95f,
+                    life = 0.4f,
+                    maxLife = 0.4f,
+                    size = if (isNitro) 10f else 6f
                 )
             )
         }
@@ -573,6 +671,10 @@ data class GameState(
     val jetpackActiveTime: Float = 0f,
     val shieldActiveTime: Float = 0f,
     val multiplierActiveTime: Float = 0f,
+    val nitroBoostTime: Float = 0f,
+    val nitroGauge: Float = 0f,
+    val warpEffectTimer: Float = 0f,
+    val warpAnnouncement: String? = null,
     val magnetMaxDuration: Float = 10f,
     val jetpackMaxDuration: Float = 8f,
     val shieldMaxDuration: Float = 15f,
@@ -580,5 +682,5 @@ data class GameState(
     val invulnerableTimer: Float = 0f
 ) {
     val isInvulnerable: Boolean
-        get() = invulnerableTimer > 0f || jetpackActiveTime > 0f
+        get() = invulnerableTimer > 0f || jetpackActiveTime > 0f || nitroBoostTime > 0f
 }

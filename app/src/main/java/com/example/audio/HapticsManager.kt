@@ -83,4 +83,18 @@ class HapticsManager(context: Context) {
             }
         } catch (_: Exception) {}
     }
+
+    fun vibrateWarp() {
+        if (!isEnabled || vibrator == null || !vibrator.hasVibrator()) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val timings = longArrayOf(0, 40, 30, 80, 40, 120)
+                val amplitudes = intArrayOf(0, 100, 0, 180, 0, 255)
+                vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(250)
+            }
+        } catch (_: Exception) {}
+    }
 }

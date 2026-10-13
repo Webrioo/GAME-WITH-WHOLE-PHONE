@@ -19,7 +19,7 @@ class GameEngineTest {
 
     @Test
     fun testBiomes() {
-        assertEquals(3, Biome.values().size)
+        assertEquals(4, Biome.values().size)
     }
 
     @Test
